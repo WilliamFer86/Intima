@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intima - Asistente de Salud Sexual</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Header -->
+        <header class="chat-header">
+            <div class="header-content">
+                <h1 class="app-title">Intima</h1>
+                <p class="app-subtitle">Tu asistente confidencial de salud sexual</p>
+            </div>
+            <button id="clearBtn" class="clear-btn" title="Limpiar conversación">
+                🗑️ Limpiar
+            </button>
+        </header>
+
+        <!-- Chat Messages Area -->
+        <main class="chat-messages" id="chatMessages">
+            <div class="welcome-message">
+                <div class="bot-avatar">🌸</div>
+                <div class="message-content">
+                    <p>¡Hola! Soy Intima, tu asistente de salud sexual. Estoy aquí para ayudarte con información confidencial y profesional.</p>
+                    <p>¿En qué puedo asistirte hoy?</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="chat-input">
+            <form id="messageForm" class="input-form">
+                <div class="input-container">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="Escribe tu pregunta aquí..." 
+                        rows="1"
+                        maxlength="1000"
+                    ></textarea>
+                    <button type="submit" id="sendBtn" class="send-btn" disabled>
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                <div class="input-info">
+                    <span id="charCount">0</span>/1000 caracteres
+                </div>
+            </form>
+        </footer>
+
+        <!-- Loading Indicator -->
+        <div id="typingIndicator" class="typing-indicator" style="display: none;">
+            <div class="bot-avatar">🌸</div>
+            <div class="typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Estado de la aplicación
+        let isTyping = false;
+        const chatMessages = document.getElementById('chatMessages');
+        const messageForm = document.getElementById('messageForm');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const typingIndicator = document.getElementById('typingIndicator');
+        const charCount = document.getElementById('charCount');
+
+        // Auto-resize del textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+            
+            // Actualizar contador de caracteres
+            charCount.textContent = this.value.length;
+            
+            // Habilitar/deshabilitar botón de enviar
+            sendBtn.disabled = !this.value.trim() || this.value.trim().length === 0;
+        });
+
+        // Enviar mensaje
+        messageForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message || isTyping) return;
+
+            // Añadir mensaje del usuario
+            addMessage(message, 'user');
+            
+            // Limpiar input y deshabilitar
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            charCount.textContent = '0';
+            sendBtn.disabled = true;
+            isTyping = true;
+            
+            // Mostrar indicador de escritura
+            showTypingIndicator();
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ message: message })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    hideTypingIndicator();
+                    addMessage(data.response, 'bot');
+                } else {
+                    hideTypingIndicator();
+                    addMessage('Lo siento, hubo un error. Por favor, intenta de nuevo.', 'bot', true);
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('Error de conexión. Por favor, verifica tu internet.', 'bot', true);
+            } finally {
+                isTyping = false;
+                sendBtn.disabled = false;
+                messageInput.focus();
+            }
+        });
+
+        // Limpiar conversación
+        clearBtn.addEventListener('click', async function() {
+            if (confirm('¿Estás segura de que quieres limpiar toda la conversación?')) {
+                try {
+                    await fetch('/clear_history', { method: 'POST' });
+                    chatMessages.innerHTML = `
+                        <div class="welcome-message">
+                            <div class="bot-avatar">🌸</div>
+                            <div class="message-content">
+                                <p>¡Hola! Soy Intima, tu asistente de salud sexual. Estoy aquí para ayudarte con información confidencial y profesional.</p>
+                                <p>¿En qué puedo asistirte hoy?</p>
+                            </div>
+                        </div>
+                    `;
+                } catch (error) {
+                    console.error('Error al limpiar conversación:', error);
+                }
+            }
+        });
+
+        // Añadir mensaje al chat
+        function addMessage(content, sender, isError = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            if (isError) messageDiv.className += ' error-message';
+
+            const avatar = sender === 'user' ? 
+                '<div class="user-avatar">👤</div>' : 
+                '<div class="bot-avatar">🌸</div>';
+
+            messageDiv.innerHTML = `
+                ${avatar}
+                <div class="message-content">
+                    <p>${escapeHtml(content)}</p>
+                    <div class="message-time">${getCurrentTime()}</div>
+                </div>
+            `;
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Indicador de escritura
+        function showTypingIndicator() {
+            typingIndicator.style.display = 'flex';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            typingIndicator.style.display = 'none';
+        }
+
+        // Utilidades
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function getCurrentTime() {
+            const now = new Date();
+            return now.toLocaleTimeString('es-ES', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+        }
+
+        // Enfocar input al cargar
+        messageInput.focus();
+    </script>
+</body>
+</html>
