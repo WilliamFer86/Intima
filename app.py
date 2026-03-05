@@ -1,71 +1,64 @@
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 import os
-import google.generativeai as genai
-import json
+import requests
 
-# Cargar variables de entorno
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  # Clave secreta para sesiones
+app.secret_key = os.urandom(24)
 
-# Configurar Gemini API
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-pro')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
+SYSTEM_PROMPT = """Eres Intima, una asistente de salud sexual empática y profesional.
+Tu rol es actuar como un primer punto de contacto para personas que enfrentan dificultades en su vida sexual o íntima.
+Eres cálida, cercana y sin juicios de valor. Profesional sin ser fría.
+Valida las emociones antes de dar información.
+Nunca realizas diagnósticos médicos ni prescribes medicamentos.
+Responde en el idioma en que el usuario te escribe."""
 
 @app.route('/')
 def index():
-    """Página principal del chat"""
     return render_template('index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Endpoint para procesar mensajes del chat"""
     try:
-        # Obtener mensaje del usuario
-        user_message = request.json.get('message', '')
+        data = request.get_json()
+        user_message = data.get('message', '').strip()
+        if not user_message:
+            return jsonify({'error': 'Mensaje vacío'}), 400
+        if 'history' not in session:
+            session['history'] = []
+        session['history'].append({"role": "user", "content": user_message})
         
-        if not user_message.strip():
-            return jsonify({'error': 'El mensaje no puede estar vacío'}), 400
+        contents = []
+        for msg in session['history']:
+            role = "user" if msg['role'] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg['content']}]})
         
-        # Inicializar historial si no existe
-        if 'chat_history' not in session:
-            session['chat_history'] = []
-        
-        # Agregar mensaje del usuario al historial
-        session['chat_history'].append({'role': 'user', 'content': user_message})
-        
-        # Preparar el contexto para Gemini
-        system_prompt = """Eres Intima, un asistente de IA especializado en salud sexual. 
-        Tu propósito es proporcionar información precisa, respetuosa y confidencial sobre salud sexual.
-        Siempre mantén un tono profesional, empático y educativo.
-        No proporciones diagnósticos médicos y recomienda consultar profesionales de la salud cuando sea necesario."""
-        
-        # Crear conversación con Gemini
-        full_prompt = f"{system_prompt}\n\nUsuario: {user_message}\n\nIntima:"
-        
-        # Llamar a Gemini API
-        response = model.generate_content(full_prompt)
-        ai_response = response.text
-        
-        # Agregar respuesta de la IA al historial
-        session['chat_history'].append({'role': 'assistant', 'content': ai_response})
-        
-        return jsonify({
-            'response': ai_response,
-            'history': session['chat_history']
-        })
-        
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={
+                "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                "contents": contents
+            }
+        )
+        print(f"Status: {response.status_code}")
+        print(f"Respuesta: {response.text[:200]}")
+        ai_response = response.json()['candidates'][0]['content']['parts'][0]['text']
+        session['history'].append({"role": "assistant", "content": ai_response})
+        session.modified = True
+        return jsonify({'response': ai_response})
     except Exception as e:
-        print(f"Error en chat: {str(e)}")
-        return jsonify({'error': 'Lo siento, hubo un error al procesar tu mensaje'}), 500
+        print(f"Error: {str(e)}")
+        return jsonify({'error': 'Lo siento, hubo un error. Por favor intenta de nuevo.'}), 500
 
 @app.route('/clear_history', methods=['POST'])
 def clear_history():
-    """Limpiar historial de chat"""
-    session.pop('chat_history', None)
-    return jsonify({'success': True})
+    session.pop('history', None)
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=5002, debug=False)
